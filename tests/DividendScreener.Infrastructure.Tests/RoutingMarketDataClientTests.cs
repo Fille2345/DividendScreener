@@ -1,0 +1,164 @@
+using DividendScreener.Core.MarketData;
+using DividendScreener.Core.Models;
+using DividendScreener.Infrastructure.MarketData;
+using Microsoft.Extensions.Logging.Abstractions;
+
+namespace DividendScreener.Infrastructure.Tests;
+
+public class RoutingMarketDataClientTests
+{
+    private readonly ScriptedClient _us = new("US");
+    private readonly ScriptedClient _eu = new("EU");
+    private readonly RoutingMarketDataClient _sut;
+
+    public RoutingMarketDataClientTests() =>
+        _sut = new RoutingMarketDataClient(_us, _eu, NullLogger<RoutingMarketDataClient>.Instance);
+
+    // ---------- Routing ----------
+
+    [Theory]
+    [InlineData("SAN.PA")]
+    [InlineData("BN.PA")]
+    [InlineData("NDA.SE")]
+    [InlineData("NDA-SE.ST")]
+    [InlineData("san.pa")]
+    public async Task SuffixedTicker_GoesToEuropeanProviderOnly(string ticker)
+    {
+        var snapshot = await _sut.GetSnapshotAsync(ticker);
+
+        Assert.Equal("EU", snapshot!.Source);
+        Assert.Equal([ticker], _eu.Calls);
+        Assert.Empty(_us.Calls);
+    }
+
+    [Theory]
+    [InlineData("KO")]
+    [InlineData("AAPL")]
+    [InlineData("FR0000120578")] // a bare ISIN has no dot either
+    public async Task PlainTicker_GoesToUsProviderOnly(string ticker)
+    {
+        var snapshot = await _sut.GetSnapshotAsync(ticker);
+
+        Assert.Equal("US", snapshot!.Source);
+        Assert.Equal([ticker], _us.Calls);
+        Assert.Empty(_eu.Calls);
+    }
+
+    // ---------- Fallback ----------
+
+    [Fact]
+    public async Task PrimaryThrows_FallsBackToSecondary()
+    {
+        _us.Throws("Your Financial Modeling Prep plan does not include data for KO.");
+
+        var snapshot = await _sut.GetSnapshotAsync("KO");
+
+        Assert.Equal("EU", snapshot!.Source);
+        Assert.Single(_us.Calls);
+        Assert.Single(_eu.Calls);
+    }
+
+    [Fact]
+    public async Task PrimaryNotFound_FallsBackToSecondary()
+    {
+        _eu.ReturnsNull(); // e.g. BRK.B is routed to the European provider, which does not know it
+
+        var snapshot = await _sut.GetSnapshotAsync("BRK.B");
+
+        Assert.Equal("US", snapshot!.Source);
+    }
+
+    [Fact]
+    public async Task NeitherKnowsTicker_ReturnsNull()
+    {
+        _eu.ReturnsNull();
+        _us.ReturnsNull();
+
+        Assert.Null(await _sut.GetSnapshotAsync("NOPE.PA"));
+        Assert.Single(_eu.Calls);
+        Assert.Single(_us.Calls);
+    }
+
+    [Fact]
+    public async Task PrimaryThrows_SecondaryNotFound_RethrowsPrimaryError()
+    {
+        var error = _eu.Throws("Eulerpool rate limit reached. Try again later.");
+        _us.ReturnsNull();
+
+        var thrown = await Assert.ThrowsAsync<MarketDataException>(() => _sut.GetSnapshotAsync("SAN.PA"));
+
+        Assert.Same(error, thrown);
+    }
+
+    [Fact]
+    public async Task PrimaryNotFound_SecondaryThrows_ReturnsNull()
+    {
+        // Eulerpool is authoritative for SAN.PA; FMP's "not in plan" would only confuse the user.
+        _eu.ReturnsNull();
+        _us.Throws("Your Financial Modeling Prep plan does not include data for SAN.PA.");
+
+        Assert.Null(await _sut.GetSnapshotAsync("SAN.PA"));
+    }
+
+    [Fact]
+    public async Task BothThrow_ThrowsCombinedError()
+    {
+        var primaryError = _eu.Throws("Eulerpool rejected the API key.");
+        _us.Throws("Financial Modeling Prep rate limit reached.");
+
+        var thrown = await Assert.ThrowsAsync<MarketDataException>(() => _sut.GetSnapshotAsync("SAN.PA"));
+
+        Assert.Contains("Eulerpool rejected the API key.", thrown.Message);
+        Assert.Contains("Fallback also failed: Financial Modeling Prep rate limit reached.", thrown.Message);
+        Assert.Same(primaryError, thrown.InnerException);
+    }
+
+    [Fact]
+    public async Task Cancellation_IsNotTreatedAsProviderFailure()
+    {
+        _eu.ThrowsException(new OperationCanceledException());
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => _sut.GetSnapshotAsync("SAN.PA"));
+        Assert.Empty(_us.Calls);
+    }
+
+    [Fact]
+    public async Task UnexpectedException_IsNotSwallowed()
+    {
+        _us.ThrowsException(new InvalidOperationException("bug"));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _sut.GetSnapshotAsync("KO"));
+        Assert.Empty(_eu.Calls);
+    }
+
+    /// <summary>Returns a snapshot tagged with its name by default; can be scripted to return null or throw.</summary>
+    private sealed class ScriptedClient(string name) : IMarketDataClient
+    {
+        private Func<string, MarketSnapshot?> _behavior = ticker => Snapshot(ticker, name);
+
+        public List<string> Calls { get; } = [];
+
+        public void ReturnsNull() => _behavior = _ => null;
+
+        public MarketDataException Throws(string message)
+        {
+            var ex = new MarketDataException(message);
+            _behavior = _ => throw ex;
+            return ex;
+        }
+
+        public void ThrowsException(Exception ex) => _behavior = _ => throw ex;
+
+        public Task<MarketSnapshot?> GetSnapshotAsync(string ticker, CancellationToken cancellationToken = default)
+        {
+            Calls.Add(ticker);
+            return Task.FromResult(_behavior(ticker));
+        }
+
+        private static MarketSnapshot Snapshot(string ticker, string source) => new(
+            new Stock { Ticker = ticker, Name = ticker, Isin = "", Exchange = "", Currency = "EUR", CurrentPrice = 10m },
+            new FinancialMetrics { Beta = 1m, DividendHistory = [new AnnualDividend(2025, 1m)] },
+            source,
+            DateTimeOffset.UnixEpoch);
+    }
+}

@@ -24,15 +24,21 @@ public class ValuationEndpointTests : IClassFixture<WebApplicationFactory<Progra
     }
 
     [Fact]
-    public async Task DefaultFmpProvider_WithoutApiKey_Returns502ExplainingTheKey()
+    public async Task DefaultRouter_WithoutApiKeys_Returns502NamingBothKeys()
     {
         var client = _defaultFactory.WithWebHostBuilder(b => b.ConfigureAppConfiguration((_, config) =>
-            config.AddInMemoryCollection(new Dictionary<string, string?> { ["FMP_API_KEY"] = "" }))).CreateClient();
+            config.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["FMP_API_KEY"] = "",
+                ["EULERPOOL_API_KEY"] = "",
+            }))).CreateClient();
 
         var response = await client.GetAsync("/api/valuations/SAN.PA");
 
         Assert.Equal(HttpStatusCode.BadGateway, response.StatusCode);
-        Assert.Contains("FMP_API_KEY", await response.Content.ReadAsStringAsync());
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("EULERPOOL_API_KEY", body); // primary for SAN.PA
+        Assert.Contains("FMP_API_KEY", body);       // fallback
     }
 
     [Fact]

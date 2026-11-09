@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Net;
 using System.Text.Json;
 using DividendScreener.Core.MarketData;
@@ -20,9 +19,6 @@ public sealed class FmpMarketDataClient(
     ILogger<FmpMarketDataClient> logger) : IMarketDataClient
 {
     public const string SourceName = "Financial Modeling Prep";
-
-    /// <summary>A 10-year CAGR needs 11 annual data points.</summary>
-    internal const int HistoryYears = 11;
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -78,43 +74,9 @@ public sealed class FmpMarketDataClient(
         return new MarketSnapshot(stock, metrics, SourceName, timeProvider.GetUtcNow());
     }
 
-    /// <summary>
-    /// Sums per-payment dividends into calendar years of the ex-dividend date and returns up to
-    /// <see cref="HistoryYears"/> complete years, oldest first.
-    /// </summary>
-    /// <remarks>
-    /// The current year is excluded because it is incomplete. Years inside the window with no payment are
-    /// reported as 0 (e.g. the 2020 suspensions by many European companies), so a lapsed dividend shows as
-    /// a cut instead of an old D0. The earliest year in FMP's data is dropped when it falls inside the window,
-    /// because the data may start mid-year and understate that year's total.
-    /// </remarks>
-    internal static IReadOnlyList<AnnualDividend> ToAnnualHistory(IEnumerable<FmpDividend> payments, int currentYear)
-    {
-        var byYear = new Dictionary<int, decimal>();
-        foreach (var p in payments)
-        {
-            var amount = p.AdjDividend ?? p.Dividend;
-            if (amount is not > 0 ||
-                !DateOnly.TryParseExact(p.Date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date) ||
-                date.Year >= currentYear)
-                continue;
-
-            byYear[date.Year] = byYear.GetValueOrDefault(date.Year) + amount.Value;
-        }
-
-        if (byYear.Count == 0)
-            return [];
-
-        var lastFullYear = currentYear - 1;
-        var windowStart = lastFullYear - HistoryYears + 1;
-        var earliest = byYear.Keys.Min();
-        var firstYear = earliest > windowStart ? earliest + 1 : windowStart;
-
-        var history = new List<AnnualDividend>();
-        for (var year = firstYear; year <= lastFullYear; year++)
-            history.Add(new AnnualDividend(year, byYear.GetValueOrDefault(year)));
-        return history;
-    }
+    /// <summary>Annual history from FMP payment rows, keyed by ex-dividend date, preferring split-adjusted amounts.</summary>
+    internal static IReadOnlyList<AnnualDividend> ToAnnualHistory(IEnumerable<FmpDividend> payments, int currentYear) =>
+        AnnualDividendHistory.FromPayments(payments.Select(p => (p.Date, p.AdjDividend ?? p.Dividend)), currentYear);
 
     private static decimal? FreeCashFlowOf(FmpCashFlowStatement s) =>
         s.FreeCashFlow ?? (s.OperatingCashFlow + s.CapitalExpenditure); // capex is reported as a negative number

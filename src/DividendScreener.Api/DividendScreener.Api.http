@@ -34,3 +34,8 @@ GET {{host}}/api/valuations/STDX?riskFreeRate=0.03&marketReturn=0.085&maxGrowthR
 
 # Needs FMP_API_KEY (user secret or environment variable)
 GET {{host}}/api/valuations/SAN.PA?costBasis=80
+
+###
+
+# Routed to Eulerpool (needs EULERPOOL_API_KEY), falls back to FMP
+GET {{host}}/api/valuations/BN.PA

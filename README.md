@@ -3,10 +3,11 @@
 Intrinsic-value analysis for European dividend stocks.
 
 - `src/DividendScreener.Core`: domain models, the valuation engine, and the `IMarketDataClient` abstraction (no web dependencies)
-- `src/DividendScreener.Infrastructure`: market data providers and caching
+- `src/DividendScreener.Infrastructure`: market data providers (FMP, Eulerpool), routing and caching
 - `src/DividendScreener.Api`: ASP.NET Core minimal API (.NET 10)
 - `tests/DividendScreener.Core.Tests`: xUnit tests for the valuation math
-- `tests/DividendScreener.Api.Tests`: endpoint and caching tests
+- `tests/DividendScreener.Infrastructure.Tests`: provider parsing (mock HTTP), routing and caching tests
+- `tests/DividendScreener.Api.Tests`: endpoint tests
 - `client`: React + TypeScript (Vite) dashboard
 
 ## Valuation model
@@ -35,32 +36,43 @@ All math runs in `decimal`; the CAGR n-th root is refined with Newton's method t
 
 Providers implement `IMarketDataClient` and are selected with `MarketData:Provider` in `appsettings.json`:
 
-- `Fmp` (default): [Financial Modeling Prep](https://site.financialmodelingprep.com/) `/stable` API.
-  One lookup makes three requests (`profile`, `cash-flow-statement`, `dividends`).
-- `Sample`: offline, one fictitious company (`STDX`), labelled "Sample data (fictitious)".
+| Provider | Use |
+|---|---|
+| `Router` (default) | Tickers with an exchange suffix (`SAN.PA`, `NDA-SE.ST`) go to Eulerpool; plain tickers (`KO`) go to FMP. If the first provider fails or doesn't know the ticker, the other one is tried. |
+| `Fmp` | [Financial Modeling Prep](https://site.financialmodelingprep.com/) `/stable` API only. Free plan: US listings, 250 requests/day. |
+| `Eulerpool` | [Eulerpool](https://eulerpool.com/developers) `/api/1` only. Covers European listings. |
+| `Sample` | Offline, one fictitious company (`STDX`). |
 
-Snapshots are cached per ticker for `MarketData:CacheDuration` (default 15 minutes), which keeps
-repeated valuations within FMP's free quota (250 requests a day).
+Router outcomes: if neither provider knows the ticker → 404. If the first provider says "unknown ticker" and
+the fallback errors → 404 (the first provider's answer wins). If both fail → 502 naming both reasons.
 
-### FMP API key
+Snapshots are cached per ticker for `MarketData:CacheDuration` (default 15 minutes). One lookup costs
+3 FMP requests or 5 Eulerpool requests, plus the other provider's requests when it falls back.
 
-The key is read from the `FMP_API_KEY` configuration value and is never stored in the repo. Either:
+### API keys
+
+Keys are read from `FMP_API_KEY` and `EULERPOOL_API_KEY` and are never stored in the repo:
 
 ```sh
-dotnet user-secrets set FMP_API_KEY "<your key>" --project src/DividendScreener.Api   # Development only
-export FMP_API_KEY="<your key>"                                                      # any environment
+dotnet user-secrets set FMP_API_KEY "<your key>" --project src/DividendScreener.Api        # Development only
+dotnet user-secrets set EULERPOOL_API_KEY "<your key>" --project src/DividendScreener.Api
+export FMP_API_KEY="<your key>" EULERPOOL_API_KEY="<your key>"                           # any environment
 ```
 
-### How FMP data is interpreted
+FMP takes the key as a query parameter (redacted in logs); Eulerpool takes it as a Bearer header.
 
-- **Dividend history** is summed per calendar year of the ex-dividend date, using split-adjusted amounts.
+### How provider data is interpreted
+
+- **Dividend history** is summed per calendar year of the ex-dividend date (split-adjusted on FMP).
   The current year is excluded because it is incomplete. Years with no payment inside the 11-year window
   count as 0, so a suspended or cancelled dividend shows up as a cut.
-- **FCF payout** uses the latest annual cash-flow statement. If the statement is missing or not covered by
-  your FMP plan, the valuation still runs and the payout ratio is reported as unavailable.
-- **Errors**: unknown ticker → 404. Missing key, rejected key, rate limit, data not covered by your plan,
-  timeouts and malformed responses → 502 with an explanation. Network errors and 5xx responses are retried
-  twice; 429 is not, since FMP's limits are daily.
+- **FCF payout** uses the latest complete annual cash-flow statement. Eulerpool reports statements in millions
+  and publishes the newest year early with capex and dividends still at 0; such rows are skipped. If no
+  statement is available, the valuation still runs and the payout ratio is reported as unavailable.
+- **Eulerpool identifiers**: the profile endpoint resolves the ticker (`SAN.PA` → `FR0000120578`, while plain
+  `SAN` is Santander's US ADR); every other call uses that ISIN. A bare ISIN works too.
+- **Errors**: missing or rejected keys, rate limits, data outside your plan, timeouts and malformed responses
+  → 502 with an explanation. Network errors and 5xx responses are retried twice; 429 is not.
 
 ## Run
 
