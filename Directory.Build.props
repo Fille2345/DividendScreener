@@ -1,0 +1,11 @@
+<Project>
+  <PropertyGroup>
+    <!-- Target framework for every project lives here, so moving to a newer LTS is a one-line change. -->
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- Let net8.0 builds run on machines that only have a newer runtime installed. -->
+    <RollForward>Major</RollForward>
+  </PropertyGroup>
+</Project>

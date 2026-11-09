@@ -1,0 +1,23 @@
+@host = http://localhost:5020
+
+GET {{host}}/api/health
+
+###
+
+POST {{host}}/api/valuations
+Content-Type: application/json
+
+{
+  "stock": { "ticker": "STDX", "name": "Standard Dividend SA", "isin": "FR0000000000", "exchange": "Euronext Paris", "currency": "EUR", "currentPrice": 50.00 },
+  "metrics": {
+    "beta": 1.2,
+    "freeCashFlow": 8000000000,
+    "dividendsPaid": -4400000000,
+    "dividendHistory": [
+      { "fiscalYear": 2019, "dividendPerShare": 2.4333058048 },
+      { "fiscalYear": 2021, "dividendPerShare": 2.63186355847168 },
+      { "fiscalYear": 2024, "dividendPerShare": 2.96048856983668785152 }
+    ]
+  },
+  "market": { "riskFreeRate": 0.03, "expectedMarketReturn": 0.08 }
+}
