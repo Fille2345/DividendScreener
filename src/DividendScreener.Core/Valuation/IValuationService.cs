@@ -22,6 +22,14 @@ public interface IValuationService
     /// <summary>Dividends paid / free cash flow. Null when free cash flow is zero or negative.</summary>
     decimal? CalculateFcfPayoutRatio(decimal dividendsPaid, decimal freeCashFlow);
 
-    /// <summary>Runs the full dividend discount valuation for one stock.</summary>
-    ValuationResult Value(Stock stock, FinancialMetrics metrics, MarketAssumptions market, ValuationOptions? options = null);
+    /// <summary>Annual dividend / price. Used for both dividend yield and yield on cost. Null when price is not positive.</summary>
+    decimal? CalculateYield(decimal annualDividend, decimal price);
+
+    /// <summary>
+    /// Runs the full dividend discount valuation for one stock.
+    /// <paramref name="costBasis"/> is the investor's purchase price per share, used for yield on cost.
+    /// </summary>
+    ValuationResult Value(
+        Stock stock, FinancialMetrics metrics, MarketAssumptions market,
+        ValuationOptions? options = null, decimal? costBasis = null);
 }

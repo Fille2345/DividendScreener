@@ -21,3 +21,11 @@ Content-Type: application/json
   },
   "market": { "riskFreeRate": 0.03, "expectedMarketReturn": 0.08 }
 }
+
+###
+
+GET {{host}}/api/valuations/STDX?costBasis=35
+
+###
+
+GET {{host}}/api/valuations/STDX?riskFreeRate=0.03&marketReturn=0.085&maxGrowthRate=0.03

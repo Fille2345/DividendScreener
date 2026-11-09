@@ -61,8 +61,17 @@ public sealed class ValuationService : IValuationService
         return Math.Abs(dividendsPaid) / freeCashFlow;
     }
 
+    public decimal? CalculateYield(decimal annualDividend, decimal price)
+    {
+        if (annualDividend < 0)
+            throw new ArgumentOutOfRangeException(nameof(annualDividend), annualDividend, "Dividend cannot be negative.");
+
+        return price > 0 ? annualDividend / price : null;
+    }
+
     public ValuationResult Value(
-        Stock stock, FinancialMetrics metrics, MarketAssumptions market, ValuationOptions? options = null)
+        Stock stock, FinancialMetrics metrics, MarketAssumptions market,
+        ValuationOptions? options = null, decimal? costBasis = null)
     {
         ArgumentNullException.ThrowIfNull(stock);
         ArgumentNullException.ThrowIfNull(metrics);
@@ -71,6 +80,8 @@ public sealed class ValuationService : IValuationService
 
         if (metrics.DividendHistory.Count == 0)
             throw new ArgumentException("Dividend history is empty.", nameof(metrics));
+        if (costBasis is <= 0)
+            throw new ArgumentOutOfRangeException(nameof(costBasis), costBasis, "Cost basis must be positive.");
 
         var warnings = new List<string>();
         var byYear = ToYearLookup(metrics.DividendHistory);
@@ -132,8 +143,10 @@ public sealed class ValuationService : IValuationService
         return new ValuationResult
         {
             Ticker = stock.Ticker,
+            Name = stock.Name,
             Currency = stock.Currency,
             CurrentPrice = stock.CurrentPrice,
+            Beta = metrics.Beta,
             RequiredReturn = r,
             DividendCagr3Y = cagrs[3],
             DividendCagr5Y = cagrs[5],
@@ -142,6 +155,8 @@ public sealed class ValuationService : IValuationService
             GrowthRatePeriodYears = gPeriod,
             CurrentDividend = currentDividend,
             NextDividend = nextDividend,
+            DividendYield = CalculateYield(currentDividend, stock.CurrentPrice),
+            YieldOnCost = costBasis is { } cost ? CalculateYield(currentDividend, cost) : null,
             IntrinsicValue = intrinsicValue,
             MarginOfSafety = marginOfSafety,
             FcfPayoutRatio = fcfPayout,

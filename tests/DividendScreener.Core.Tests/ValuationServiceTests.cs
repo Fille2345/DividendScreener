@@ -194,6 +194,31 @@ public class ValuationServiceTests
         Assert.Null(_sut.CalculateFcfPayoutRatio(4400m, decimal.Parse(fcf, Inv)));
     }
 
+    // ---------- Yield ----------
+
+    [Theory]
+    [InlineData("3.92", "98", "0.04")]
+    [InlineData("2.00", "25", "0.08")]
+    [InlineData("0", "40", "0")]
+    public void Yield_MatchesFormula(string dividend, string price, string expected)
+    {
+        Assert.Equal(decimal.Parse(expected, Inv), _sut.CalculateYield(decimal.Parse(dividend, Inv), decimal.Parse(price, Inv)));
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("-5")]
+    public void Yield_NonPositivePrice_ReturnsNull(string price)
+    {
+        Assert.Null(_sut.CalculateYield(2m, decimal.Parse(price, Inv)));
+    }
+
+    [Fact]
+    public void Yield_NegativeDividend_Throws()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => _sut.CalculateYield(-1m, 50m));
+    }
+
     // ---------- Full valuation ----------
 
     [Fact]
@@ -202,8 +227,10 @@ public class ValuationServiceTests
         var result = _sut.Value(TestData.StandardStock, TestData.StandardMetrics, TestData.StandardMarket);
 
         Assert.Equal("STDX", result.Ticker);
+        Assert.Equal("Standard Dividend SA", result.Name);
         Assert.Equal("EUR", result.Currency);
         Assert.Equal(50.00m, result.CurrentPrice);
+        Assert.Equal(1.2m, result.Beta);
         Assert.Equal(0.09m, result.RequiredReturn);
         Assert.Equal(0.04m, result.DividendCagr3Y!.Value, RootPrecision);
         Assert.Equal(0.04m, result.DividendCagr5Y!.Value, RootPrecision);
@@ -217,7 +244,30 @@ public class ValuationServiceTests
         // (61.578162... − 50) / 61.578162...
         Assert.Equal(0.188023835545914835913m, result.MarginOfSafety!.Value, 20);
         Assert.Equal(0.55m, result.FcfPayoutRatio);
+        // 2.96048856983668785152 / 50
+        Assert.Equal(0.0592097713967337570304m, result.DividendYield);
+        Assert.Null(result.YieldOnCost);
         Assert.Empty(result.Warnings);
+    }
+
+    [Fact]
+    public void Value_WithCostBasis_ReportsYieldOnCost()
+    {
+        var result = _sut.Value(
+            TestData.StandardStock, TestData.StandardMetrics, TestData.StandardMarket, costBasis: 32m);
+
+        // 2.96048856983668785152 / 32
+        Assert.Equal(0.09251526780739649536m, result.YieldOnCost);
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("-10")]
+    public void Value_NonPositiveCostBasis_Throws(string costBasis)
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => _sut.Value(
+            TestData.StandardStock, TestData.StandardMetrics, TestData.StandardMarket,
+            costBasis: decimal.Parse(costBasis, Inv)));
     }
 
     [Fact]

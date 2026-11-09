@@ -37,12 +37,15 @@ export interface ValuationRequest {
   metrics: FinancialMetrics
   market: MarketAssumptions
   options?: ValuationOptions
+  costBasis?: number | null
 }
 
 export interface ValuationResult {
   ticker: string
+  name: string
   currency: string
   currentPrice: number
+  beta: number
   requiredReturn: number
   dividendCagr3Y: number | null
   dividendCagr5Y: number | null
@@ -51,8 +54,28 @@ export interface ValuationResult {
   growthRatePeriodYears: number | null
   currentDividend: number
   nextDividend: number | null
+  dividendYield: number | null
+  yieldOnCost: number | null
   intrinsicValue: number | null
   marginOfSafety: number | null
   fcfPayoutRatio: number | null
   warnings: string[]
+}
+
+/** GET /api/valuations/{ticker}: the valuation plus the inputs it was computed from. */
+export interface StockValuationResponse {
+  stock: Stock
+  metrics: FinancialMetrics
+  market: MarketAssumptions
+  valuation: ValuationResult
+  source: string
+  retrievedAt: string
+}
+
+/** Optional per-request overrides, as decimal fractions. */
+export interface ValuationQuery {
+  costBasis?: number
+  riskFreeRate?: number
+  marketReturn?: number
+  maxGrowthRate?: number
 }
