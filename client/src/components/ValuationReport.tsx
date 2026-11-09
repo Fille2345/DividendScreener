@@ -107,7 +107,11 @@ export function ValuationReport({ data }: { data: StockValuationResponse }) {
             <Metric
               label="FCF payout ratio"
               value={formatPercent(v.fcfPayoutRatio, 1)}
-              note={`${formatCompactMoney(Math.abs(metrics.dividendsPaid), ccy)} / ${formatCompactMoney(metrics.freeCashFlow, ccy)}`}
+              note={
+                metrics.dividendsPaid !== null && metrics.freeCashFlow !== null
+                  ? `${formatCompactMoney(Math.abs(metrics.dividendsPaid), ccy)} / ${formatCompactMoney(metrics.freeCashFlow, ccy)}`
+                  : 'cash-flow data unavailable'
+              }
             />
           </div>
         </div>

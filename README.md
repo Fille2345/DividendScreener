@@ -33,11 +33,34 @@ All math runs in `decimal`; the CAGR n-th root is refined with Newton's method t
 
 ## Market data
 
-Providers implement `IMarketDataClient` and are selected with `MarketData:Provider` in `appsettings.json`.
-Snapshots are cached per ticker for `MarketData:CacheDuration` (default 15 minutes).
+Providers implement `IMarketDataClient` and are selected with `MarketData:Provider` in `appsettings.json`:
 
-Only the `Sample` provider exists so far. It serves one fictitious company, `STDX`, tagged
-"Sample data (fictitious)" in every response. A real provider is still to be chosen.
+- `Fmp` (default): [Financial Modeling Prep](https://site.financialmodelingprep.com/) `/stable` API.
+  One lookup makes three requests (`profile`, `cash-flow-statement`, `dividends`).
+- `Sample`: offline, one fictitious company (`STDX`), labelled "Sample data (fictitious)".
+
+Snapshots are cached per ticker for `MarketData:CacheDuration` (default 15 minutes), which keeps
+repeated valuations within FMP's free quota (250 requests a day).
+
+### FMP API key
+
+The key is read from the `FMP_API_KEY` configuration value and is never stored in the repo. Either:
+
+```sh
+dotnet user-secrets set FMP_API_KEY "<your key>" --project src/DividendScreener.Api   # Development only
+export FMP_API_KEY="<your key>"                                                      # any environment
+```
+
+### How FMP data is interpreted
+
+- **Dividend history** is summed per calendar year of the ex-dividend date, using split-adjusted amounts.
+  The current year is excluded because it is incomplete. Years with no payment inside the 11-year window
+  count as 0, so a suspended or cancelled dividend shows up as a cut.
+- **FCF payout** uses the latest annual cash-flow statement. If the statement is missing or not covered by
+  your FMP plan, the valuation still runs and the payout ratio is reported as unavailable.
+- **Errors**: unknown ticker → 404. Missing key, rejected key, rate limit, data not covered by your plan,
+  timeouts and malformed responses → 502 with an explanation. Network errors and 5xx responses are retried
+  twice; 429 is not, since FMP's limits are daily.
 
 ## Run
 

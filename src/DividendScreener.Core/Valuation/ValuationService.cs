@@ -134,10 +134,19 @@ public sealed class ValuationService : IValuationService
             ? (intrinsicValue.Value - stock.CurrentPrice) / intrinsicValue.Value
             : null;
 
-        var fcfPayout = CalculateFcfPayoutRatio(metrics.DividendsPaid, metrics.FreeCashFlow);
-        if (fcfPayout is null)
-            warnings.Add("Free cash flow is zero or negative; FCF payout ratio is not meaningful.");
-        else if (fcfPayout > 1m)
+        decimal? fcfPayout = null;
+        if (metrics.FreeCashFlow is not { } fcf || metrics.DividendsPaid is not { } dividendsPaid)
+        {
+            warnings.Add("Cash-flow data is unavailable; FCF payout ratio cannot be calculated.");
+        }
+        else
+        {
+            fcfPayout = CalculateFcfPayoutRatio(dividendsPaid, fcf);
+            if (fcfPayout is null)
+                warnings.Add("Free cash flow is zero or negative; FCF payout ratio is not meaningful.");
+        }
+
+        if (fcfPayout > 1m)
             warnings.Add($"Dividends exceed free cash flow (FCF payout {fcfPayout:P1}); the dividend may not be sustainable.");
 
         return new ValuationResult

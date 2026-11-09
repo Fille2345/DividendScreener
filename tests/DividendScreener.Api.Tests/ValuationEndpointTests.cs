@@ -2,8 +2,10 @@ using System.Net;
 using System.Net.Http.Json;
 using DividendScreener.Core.MarketData;
 using DividendScreener.Core.Models;
+using DividendScreener.Infrastructure.MarketData;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -11,9 +13,27 @@ namespace DividendScreener.Api.Tests;
 
 public class ValuationEndpointTests : IClassFixture<WebApplicationFactory<Program>>
 {
+    private readonly WebApplicationFactory<Program> _defaultFactory;
     private readonly WebApplicationFactory<Program> _factory;
 
-    public ValuationEndpointTests(WebApplicationFactory<Program> factory) => _factory = factory;
+    public ValuationEndpointTests(WebApplicationFactory<Program> factory)
+    {
+        _defaultFactory = factory;
+        // Most tests run against the offline sample provider so they never touch the network.
+        _factory = WithMarketData(new SampleMarketDataClient(TimeProvider.System));
+    }
+
+    [Fact]
+    public async Task DefaultFmpProvider_WithoutApiKey_Returns502ExplainingTheKey()
+    {
+        var client = _defaultFactory.WithWebHostBuilder(b => b.ConfigureAppConfiguration((_, config) =>
+            config.AddInMemoryCollection(new Dictionary<string, string?> { ["FMP_API_KEY"] = "" }))).CreateClient();
+
+        var response = await client.GetAsync("/api/valuations/SAN.PA");
+
+        Assert.Equal(HttpStatusCode.BadGateway, response.StatusCode);
+        Assert.Contains("FMP_API_KEY", await response.Content.ReadAsStringAsync());
+    }
 
     [Fact]
     public async Task SampleTicker_ReturnsValuationWithDefaultAssumptions()
@@ -89,7 +109,7 @@ public class ValuationEndpointTests : IClassFixture<WebApplicationFactory<Progra
     }
 
     private WebApplicationFactory<Program> WithMarketData(IMarketDataClient client) =>
-        _factory.WithWebHostBuilder(b => b.ConfigureServices(services =>
+        _defaultFactory.WithWebHostBuilder(b => b.ConfigureServices(services =>
             services.Replace(ServiceDescriptor.Singleton(client))));
 
     private sealed class ThrowingMarketDataClient : IMarketDataClient

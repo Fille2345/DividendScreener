@@ -2,7 +2,7 @@ using DividendScreener.Core.MarketData;
 using DividendScreener.Infrastructure.MarketData;
 using Microsoft.Extensions.Caching.Memory;
 
-namespace DividendScreener.Api.Tests;
+namespace DividendScreener.Infrastructure.Tests;
 
 public class CachingMarketDataClientTests
 {

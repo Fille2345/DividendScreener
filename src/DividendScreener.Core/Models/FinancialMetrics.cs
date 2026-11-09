@@ -12,14 +12,14 @@ public sealed record FinancialMetrics
     /// <summary>Equity beta against the reference market index.</summary>
     public required decimal Beta { get; init; }
 
-    /// <summary>Free cash flow: operating cash flow minus capital expenditure.</summary>
-    public required decimal FreeCashFlow { get; init; }
+    /// <summary>Free cash flow: operating cash flow minus capital expenditure. Null when the provider has no cash-flow statement.</summary>
+    public decimal? FreeCashFlow { get; init; }
 
     /// <summary>
     /// Total cash dividends paid. Cash-flow statements usually show this as a negative outflow;
-    /// either sign is accepted and the magnitude is used.
+    /// either sign is accepted and the magnitude is used. Null when unknown.
     /// </summary>
-    public required decimal DividendsPaid { get; init; }
+    public decimal? DividendsPaid { get; init; }
 
     /// <summary>Annual dividend per share history; the most recent year is treated as D0.</summary>
     public required IReadOnlyList<AnnualDividend> DividendHistory { get; init; }

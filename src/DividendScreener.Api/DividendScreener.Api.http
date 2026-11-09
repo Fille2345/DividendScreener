@@ -29,3 +29,8 @@ GET {{host}}/api/valuations/STDX?costBasis=35
 ###
 
 GET {{host}}/api/valuations/STDX?riskFreeRate=0.03&marketReturn=0.085&maxGrowthRate=0.03
+
+###
+
+# Needs FMP_API_KEY (user secret or environment variable)
+GET {{host}}/api/valuations/SAN.PA?costBasis=80

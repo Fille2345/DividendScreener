@@ -17,6 +17,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DividendScreener.Infrastruc
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DividendScreener.Api.Tests", "tests\DividendScreener.Api.Tests\DividendScreener.Api.Tests.csproj", "{C3652401-FE74-4739-8E9B-D33C20B7C017}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DividendScreener.Infrastructure.Tests", "tests\DividendScreener.Infrastructure.Tests\DividendScreener.Infrastructure.Tests.csproj", "{E8AEF2AC-C39C-4155-8C60-15C6082E9CC5}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -87,6 +89,18 @@ Global
 		{C3652401-FE74-4739-8E9B-D33C20B7C017}.Release|x64.Build.0 = Release|Any CPU
 		{C3652401-FE74-4739-8E9B-D33C20B7C017}.Release|x86.ActiveCfg = Release|Any CPU
 		{C3652401-FE74-4739-8E9B-D33C20B7C017}.Release|x86.Build.0 = Release|Any CPU
+		{E8AEF2AC-C39C-4155-8C60-15C6082E9CC5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E8AEF2AC-C39C-4155-8C60-15C6082E9CC5}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E8AEF2AC-C39C-4155-8C60-15C6082E9CC5}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{E8AEF2AC-C39C-4155-8C60-15C6082E9CC5}.Debug|x64.Build.0 = Debug|Any CPU
+		{E8AEF2AC-C39C-4155-8C60-15C6082E9CC5}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{E8AEF2AC-C39C-4155-8C60-15C6082E9CC5}.Debug|x86.Build.0 = Debug|Any CPU
+		{E8AEF2AC-C39C-4155-8C60-15C6082E9CC5}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E8AEF2AC-C39C-4155-8C60-15C6082E9CC5}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E8AEF2AC-C39C-4155-8C60-15C6082E9CC5}.Release|x64.ActiveCfg = Release|Any CPU
+		{E8AEF2AC-C39C-4155-8C60-15C6082E9CC5}.Release|x64.Build.0 = Release|Any CPU
+		{E8AEF2AC-C39C-4155-8C60-15C6082E9CC5}.Release|x86.ActiveCfg = Release|Any CPU
+		{E8AEF2AC-C39C-4155-8C60-15C6082E9CC5}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -97,5 +111,6 @@ Global
 		{9B160390-89E2-47EE-B8BB-F704D5966DEA} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{9407B17C-BAAA-4C84-8F61-26C27C24AB94} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{C3652401-FE74-4739-8E9B-D33C20B7C017} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
+		{E8AEF2AC-C39C-4155-8C60-15C6082E9CC5} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 	EndGlobalSection
 EndGlobal

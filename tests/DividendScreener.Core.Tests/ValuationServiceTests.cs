@@ -359,6 +359,18 @@ public class ValuationServiceTests
     }
 
     [Fact]
+    public void Value_MissingCashFlowData_WarnsAndOmitsPayout()
+    {
+        var noCashFlow = TestData.StandardMetrics with { FreeCashFlow = null, DividendsPaid = null };
+
+        var result = _sut.Value(TestData.StandardStock, noCashFlow, TestData.StandardMarket);
+
+        Assert.Null(result.FcfPayoutRatio);
+        Assert.NotNull(result.IntrinsicValue);
+        Assert.Contains(result.Warnings, w => w.Contains("Cash-flow data is unavailable"));
+    }
+
+    [Fact]
     public void Value_DividendsExceedFcf_Warns()
     {
         var overpaying = TestData.StandardMetrics with { FreeCashFlow = 4_000_000_000m };

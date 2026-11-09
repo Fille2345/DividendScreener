@@ -17,8 +17,8 @@ export interface AnnualDividend {
 
 export interface FinancialMetrics {
   beta: number
-  freeCashFlow: number
-  dividendsPaid: number
+  freeCashFlow: number | null
+  dividendsPaid: number | null
   dividendHistory: AnnualDividend[]
 }
 
