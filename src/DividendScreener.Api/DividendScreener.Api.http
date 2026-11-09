@@ -39,3 +39,12 @@ GET {{host}}/api/valuations/SAN.PA?costBasis=80
 
 # Routed to Eulerpool (needs EULERPOOL_API_KEY), falls back to FMP
 GET {{host}}/api/valuations/BN.PA
+
+###
+
+# Raw Eulerpool response (Development only)
+GET {{host}}/api/debug/eulerpool/NDA-SE.ST
+
+###
+
+GET {{host}}/api/debug/eulerpool/SE0000108656?endpoint=price-metrics

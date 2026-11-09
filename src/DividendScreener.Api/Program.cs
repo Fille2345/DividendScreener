@@ -1,8 +1,11 @@
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using DividendScreener.Core.MarketData;
 using DividendScreener.Core.Models;
 using DividendScreener.Core.Valuation;
 using DividendScreener.Infrastructure;
+using DividendScreener.Infrastructure.MarketData.Eulerpool;
+using Polly.Timeout;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -55,6 +58,14 @@ app.MapGet("/api/valuations/{ticker}", async (
         {
             snapshot = await marketData.GetSnapshotAsync(ticker, cancellationToken);
         }
+        catch (TickerNotFoundException ex)
+        {
+            logger.LogInformation("Unknown ticker {Ticker}: {Reason}", ticker, ex.Message);
+            return Results.Problem(
+                title: "Unknown ticker",
+                detail: ex.Message,
+                statusCode: StatusCodes.Status404NotFound);
+        }
         catch (MarketDataException ex)
         {
             logger.LogWarning(ex, "Market data lookup failed for {Ticker}", ticker);
@@ -67,7 +78,7 @@ app.MapGet("/api/valuations/{ticker}", async (
         if (snapshot is null)
             return Results.Problem(
                 title: "Unknown ticker",
-                detail: $"No market data found for '{ticker}'.",
+                detail: $"No market data found for '{ticker}' (the provider returned no data and no reason).",
                 statusCode: StatusCodes.Status404NotFound);
 
         var market = new MarketAssumptions(
@@ -91,6 +102,65 @@ app.MapGet("/api/valuations/{ticker}", async (
         }
     })
    .WithName("ValueTicker");
+
+if (app.Environment.IsDevelopment())
+{
+    // Troubleshooting only: one raw Eulerpool request, bypassing caching, parsing and valuation.
+    // Development-only because it spends the server's API quota on behalf of whoever calls it.
+    app.MapGet("/api/debug/eulerpool/{ticker}", async (
+            string ticker,
+            string? endpoint,
+            HttpContext http,
+            CancellationToken cancellationToken) =>
+        {
+            var diagnostics = http.RequestServices.GetService<EulerpoolDiagnostics>();
+            if (diagnostics is null)
+                return Results.Problem(
+                    title: "Eulerpool is not configured",
+                    detail: "Set MarketData:Provider to Router or Eulerpool to use this endpoint.",
+                    statusCode: StatusCodes.Status404NotFound);
+
+            endpoint ??= "profile";
+            if (!EulerpoolDiagnostics.Endpoints.ContainsKey(endpoint))
+                return Results.ValidationProblem(new Dictionary<string, string[]>
+                {
+                    ["endpoint"] = [$"Use one of: {string.Join(", ", EulerpoolDiagnostics.Endpoints.Keys)}."],
+                });
+            if (!DebugIdentifier.IsValid(ticker))
+                return Results.ValidationProblem(new Dictionary<string, string[]>
+                {
+                    ["ticker"] = ["Identifier must be 1–32 characters: letters, digits, space, '.', '-', '_', '^' or '='."],
+                });
+
+            RawProviderResponse raw;
+            try
+            {
+                raw = await diagnostics.GetRawAsync(endpoint, ticker, cancellationToken);
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TimeoutRejectedException ||
+                                       (ex is TaskCanceledException && !cancellationToken.IsCancellationRequested))
+            {
+                return Results.Problem(
+                    title: "Eulerpool request failed",
+                    detail: $"{ex.GetType().Name}: {ex.Message}",
+                    statusCode: StatusCodes.Status502BadGateway);
+            }
+
+            // Upstream status is reported in the payload; this call itself succeeded.
+            return Results.Ok(new
+            {
+                raw.Url,
+                raw.StatusCode,
+                raw.ReasonPhrase,
+                raw.ContentType,
+                raw.ElapsedMs,
+                raw.ApiKeySent,
+                Body = DebugIdentifier.AsJsonOrText(raw.Body),
+            });
+        })
+       .WithName("DebugEulerpool")
+       .ExcludeFromDescription();
+}
 
 app.MapPost("/api/valuations", (ValuationRequest request, IValuationService valuation) =>
     {
@@ -141,6 +211,28 @@ internal static partial class TickerFormat
     private static partial Regex Pattern();
 
     public static bool IsValid(string ticker) => Pattern().IsMatch(ticker);
+}
+
+internal static partial class DebugIdentifier
+{
+    [GeneratedRegex(@"^[A-Za-z0-9 .\-_^=]{1,32}$")]
+    private static partial Regex Pattern();
+
+    public static bool IsValid(string identifier) => Pattern().IsMatch(identifier);
+
+    /// <summary>Embeds a JSON body as JSON (so the browser shows its structure) and anything else as a string.</summary>
+    public static object AsJsonOrText(string body)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            return doc.RootElement.Clone();
+        }
+        catch (JsonException)
+        {
+            return body;
+        }
+    }
 }
 
 public partial class Program;

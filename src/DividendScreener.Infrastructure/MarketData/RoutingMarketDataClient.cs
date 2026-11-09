@@ -5,19 +5,16 @@ namespace DividendScreener.Infrastructure.MarketData;
 
 /// <summary>
 /// Picks a provider by ticker format and falls back to the other one.
-/// Exchange-suffixed tickers (SAN.PA, NDA.ST) go to <paramref name="europeanClient"/> first;
+/// Exchange-suffixed tickers (SAN.PA, NDA-SE.ST) go to <paramref name="europeanClient"/> first;
 /// plain tickers (KO, AAPL) go to <paramref name="usClient"/> first.
 /// </summary>
 /// <remarks>
-/// Outcomes, primary first:
+/// The first snapshot wins. When neither provider returns one, the error carries every attempt's reason
+/// (HTTP status, path, provider error text or JSON parsing error), primary first:
 /// <list type="bullet">
-/// <item>Primary returns data → that data.</item>
-/// <item>Primary fails or does not know the ticker → the secondary is tried.</item>
-/// <item>Neither knows the ticker → null (404).</item>
-/// <item>Primary failed and the secondary does not know the ticker → the primary's error.</item>
-/// <item>Primary does not know the ticker and the secondary fails → null; the primary is authoritative for its own
-/// format, and the secondary's error (typically "not in plan") would only mislead. The error is logged.</item>
-/// <item>Both fail → one <see cref="MarketDataException"/> carrying both reasons.</item>
+/// <item>The primary does not know the ticker → <see cref="TickerNotFoundException"/> (404), whatever the fallback
+/// said, since the primary is authoritative for its own ticker format.</item>
+/// <item>The primary failed → <see cref="MarketDataException"/> (502).</item>
 /// </list>
 /// Class shares such as BRK.B contain a dot too; they reach the US provider through the fallback.
 /// </remarks>
@@ -30,41 +27,38 @@ public sealed class RoutingMarketDataClient(
     {
         var (primary, secondary) = IsExchangeSuffixed(ticker) ? (europeanClient, usClient) : (usClient, europeanClient);
 
-        MarketDataException? primaryError = null;
-        try
-        {
-            var snapshot = await primary.GetSnapshotAsync(ticker, cancellationToken);
-            if (snapshot is not null)
-                return snapshot;
-        }
-        catch (MarketDataException ex)
-        {
-            primaryError = ex;
-            logger.LogWarning("Primary provider failed for {Ticker}, trying fallback: {Reason}", ticker, ex.Message);
-        }
+        var primaryOutcome = await TryAsync(primary, ticker, cancellationToken);
+        if (primaryOutcome.Snapshot is not null)
+            return primaryOutcome.Snapshot;
+        logger.LogWarning("Primary provider had no data for {Ticker}, trying fallback: {Reason}", ticker, primaryOutcome.Reason);
 
-        try
-        {
-            var snapshot = await secondary.GetSnapshotAsync(ticker, cancellationToken);
-            if (snapshot is not null)
-                return snapshot;
-        }
-        catch (MarketDataException ex)
-        {
-            if (primaryError is null)
-            {
-                logger.LogInformation("Fallback provider failed for {Ticker} after primary found nothing: {Reason}",
-                    ticker, ex.Message);
-                return null;
-            }
+        var fallbackOutcome = await TryAsync(secondary, ticker, cancellationToken);
+        if (fallbackOutcome.Snapshot is not null)
+            return fallbackOutcome.Snapshot;
+        logger.LogWarning("Fallback provider had no data for {Ticker}: {Reason}", ticker, fallbackOutcome.Reason);
 
-            throw new MarketDataException($"{primaryError.Message} Fallback also failed: {ex.Message}", primaryError);
-        }
-
-        if (primaryError is not null)
-            throw primaryError;
-        return null;
+        var detail = $"{primaryOutcome.Reason} Fallback: {fallbackOutcome.Reason}";
+        throw primaryOutcome.Error is null or TickerNotFoundException
+            ? new TickerNotFoundException(detail, primaryOutcome.Error)
+            : new MarketDataException(detail, primaryOutcome.Error);
     }
 
     internal static bool IsExchangeSuffixed(string ticker) => ticker.Contains('.');
+
+    private static async Task<Outcome> TryAsync(IMarketDataClient client, string ticker, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var snapshot = await client.GetSnapshotAsync(ticker, cancellationToken);
+            return snapshot is not null
+                ? new Outcome(snapshot, null, string.Empty)
+                : new Outcome(null, null, $"{client.GetType().Name} has no data for '{ticker}'.");
+        }
+        catch (MarketDataException ex)
+        {
+            return new Outcome(null, ex, ex.Message);
+        }
+    }
+
+    private sealed record Outcome(MarketSnapshot? Snapshot, MarketDataException? Error, string Reason);
 }

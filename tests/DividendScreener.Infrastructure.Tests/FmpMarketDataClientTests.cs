@@ -188,20 +188,38 @@ public class FmpMarketDataClientTests
     // ---------- Missing data ----------
 
     [Fact]
-    public async Task UnknownSymbol_EmptyProfile_ReturnsNull_WithoutFurtherRequests()
+    public async Task UnknownSymbol_EmptyProfile_ThrowsNotFound_WithoutFurtherRequests()
     {
         _http.Json("profile", "[]");
 
-        Assert.Null(await CreateClient().GetSnapshotAsync("NOPE.PA"));
+        var ex = await Assert.ThrowsAsync<TickerNotFoundException>(() => CreateClient().GetSnapshotAsync("NOPE"));
+        Assert.Equal(
+            "Financial Modeling Prep does not recognise 'NOPE' (empty or 404 response from profile?symbol=NOPE).",
+            ex.Message);
         Assert.Single(_http.Requests);
     }
 
     [Fact]
-    public async Task UnknownSymbol_Http404_ReturnsNull()
+    public async Task UnknownSymbol_Http404_ThrowsNotFound()
     {
         _http.Status("profile", HttpStatusCode.NotFound);
 
-        Assert.Null(await CreateClient().GetSnapshotAsync("NOPE.PA"));
+        await Assert.ThrowsAsync<TickerNotFoundException>(() => CreateClient().GetSnapshotAsync("NOPE"));
+    }
+
+    [Fact]
+    public async Task Requests_AreLoggedWithStatus_ButNeverWithTheKey()
+    {
+        _http.Status("dividends", HttpStatusCode.PaymentRequired, "Premium Query Parameter");
+        var logger = new ListLogger<FmpMarketDataClient>();
+        var client = new FmpMarketDataClient(new StubHttpClientFactory(_http), new FmpOptions { ApiKey = "secret-key" },
+            new FixedTimeProvider(Now), logger);
+
+        await Assert.ThrowsAsync<MarketDataException>(() => client.GetSnapshotAsync("EXD.PA"));
+
+        Assert.Contains(logger.Entries, e => e.Message.StartsWith("FMP GET https://fmp.test/stable/profile?symbol=EXD.PA -> 200"));
+        Assert.Contains(logger.Entries, e => e.Message.StartsWith("FMP GET https://fmp.test/stable/dividends?symbol=EXD.PA -> 402"));
+        Assert.DoesNotContain(logger.Entries, e => e.Message.Contains("secret-key"));
     }
 
     [Theory]
@@ -275,16 +293,16 @@ public class FmpMarketDataClientTests
     }
 
     [Theory]
-    [InlineData(HttpStatusCode.TooManyRequests, "", "rate limit")]
+    [InlineData(HttpStatusCode.TooManyRequests, "", "rate limit reached (HTTP 429 from profile?symbol=EXD.PA)")]
     [InlineData(HttpStatusCode.OK, """{"Error Message": "Limit Reach . Please upgrade your plan or visit our documentation for more details."}""", "rate limit")]
     [InlineData(HttpStatusCode.Unauthorized, "", "rejected the API key")]
     [InlineData(HttpStatusCode.Forbidden, "", "rejected the API key")]
     [InlineData(HttpStatusCode.OK, """{"Error Message": "Invalid API KEY. Feel free to create a Free API Key."}""", "rejected the API key")]
     [InlineData(HttpStatusCode.PaymentRequired, "Premium Query Parameter: this symbol is not available under your current subscription", "plan does not include data for EXD.PA")]
     [InlineData(HttpStatusCode.OK, """{"Error Message": "Special Endpoint : this endpoint is not available under your current subscription"}""", "plan does not include data for EXD.PA")]
-    [InlineData(HttpStatusCode.InternalServerError, "", "HTTP 500")]
+    [InlineData(HttpStatusCode.InternalServerError, "", "request failed (HTTP 500 from profile?symbol=EXD.PA)")]
     [InlineData(HttpStatusCode.OK, """{"Error Message": "Something odd"}""", "Something odd")]
-    [InlineData(HttpStatusCode.OK, "<html>not json</html>", "malformed")]
+    [InlineData(HttpStatusCode.OK, "<html>not json</html>", "malformed data for EXD.PA (HTTP 200 from profile?symbol=EXD.PA): '<' is an invalid start")]
     [InlineData(HttpStatusCode.OK, """{"unexpected": "object"}""", "malformed")]
     public async Task ProfileErrors_BecomeMarketDataException(HttpStatusCode status, string body, string expectedMessage)
     {

@@ -69,48 +69,63 @@ public class RoutingMarketDataClientTests
     }
 
     [Fact]
-    public async Task NeitherKnowsTicker_ReturnsNull()
+    public async Task NeitherKnowsTicker_Throws404_WithBothReasons()
     {
-        _eu.ReturnsNull();
+        _eu.ThrowsNotFound("Eulerpool does not recognise 'NOPE.PA' (HTTP 404 from equity/profile/NOPE.PA: Security not found).");
         _us.ReturnsNull();
 
-        Assert.Null(await _sut.GetSnapshotAsync("NOPE.PA"));
+        var ex = await Assert.ThrowsAsync<TickerNotFoundException>(() => _sut.GetSnapshotAsync("NOPE.PA"));
+
+        Assert.Equal(
+            "Eulerpool does not recognise 'NOPE.PA' (HTTP 404 from equity/profile/NOPE.PA: Security not found). " +
+            "Fallback: ScriptedClient has no data for 'NOPE.PA'.",
+            ex.Message);
         Assert.Single(_eu.Calls);
         Assert.Single(_us.Calls);
     }
 
     [Fact]
-    public async Task PrimaryThrows_SecondaryNotFound_RethrowsPrimaryError()
+    public async Task PrimaryNotFound_SecondaryFails_Throws404_ThatStillShowsTheFallbackError()
     {
-        var error = _eu.Throws("Eulerpool rate limit reached. Try again later.");
-        _us.ReturnsNull();
+        // The case behind "No market data found" for NDA-SE.ST: both reasons must now reach the caller.
+        var primary = _eu.ThrowsNotFound("Eulerpool does not recognise 'NDA-SE.ST' (HTTP 404 from equity/profile/NDA-SE.ST: Security not found).");
+        _us.Throws("Your Financial Modeling Prep plan does not include data for NDA-SE.ST (HTTP 402 from profile?symbol=NDA-SE.ST).");
 
-        var thrown = await Assert.ThrowsAsync<MarketDataException>(() => _sut.GetSnapshotAsync("SAN.PA"));
+        var ex = await Assert.ThrowsAsync<TickerNotFoundException>(() => _sut.GetSnapshotAsync("NDA-SE.ST"));
 
-        Assert.Same(error, thrown);
+        Assert.Contains("HTTP 404 from equity/profile/NDA-SE.ST: Security not found", ex.Message);
+        Assert.Contains("Fallback: Your Financial Modeling Prep plan does not include data for NDA-SE.ST (HTTP 402", ex.Message);
+        Assert.Same(primary, ex.InnerException);
     }
 
     [Fact]
-    public async Task PrimaryNotFound_SecondaryThrows_ReturnsNull()
+    public async Task PrimaryFails_SecondaryNotFound_Throws502_WithBothReasons()
     {
-        // Eulerpool is authoritative for SAN.PA; FMP's "not in plan" would only confuse the user.
-        _eu.ReturnsNull();
-        _us.Throws("Your Financial Modeling Prep plan does not include data for SAN.PA.");
+        var primary = _eu.Throws("Eulerpool rate limit reached (HTTP 429 from equity/quotes/SE0000108656).");
+        _us.ThrowsNotFound("Financial Modeling Prep does not recognise 'ERIC-B.ST' (empty or 404 response from profile?symbol=ERIC-B.ST).");
 
-        Assert.Null(await _sut.GetSnapshotAsync("SAN.PA"));
+        var ex = await Assert.ThrowsAsync<MarketDataException>(() => _sut.GetSnapshotAsync("ERIC-B.ST"));
+
+        Assert.IsNotType<TickerNotFoundException>(ex);
+        Assert.Contains("HTTP 429 from equity/quotes/SE0000108656", ex.Message);
+        Assert.Contains("Fallback: Financial Modeling Prep does not recognise 'ERIC-B.ST'", ex.Message);
+        Assert.Same(primary, ex.InnerException);
     }
 
     [Fact]
-    public async Task BothThrow_ThrowsCombinedError()
+    public async Task BothFail_Throws502_WithBothReasons()
     {
-        var primaryError = _eu.Throws("Eulerpool rejected the API key.");
-        _us.Throws("Financial Modeling Prep rate limit reached.");
+        var primaryError = _eu.Throws("Eulerpool rejected the API key (HTTP 401 from equity/profile/SAN.PA).");
+        _us.Throws("Financial Modeling Prep rate limit reached (HTTP 429 from profile?symbol=SAN.PA).");
 
-        var thrown = await Assert.ThrowsAsync<MarketDataException>(() => _sut.GetSnapshotAsync("SAN.PA"));
+        var ex = await Assert.ThrowsAsync<MarketDataException>(() => _sut.GetSnapshotAsync("SAN.PA"));
 
-        Assert.Contains("Eulerpool rejected the API key.", thrown.Message);
-        Assert.Contains("Fallback also failed: Financial Modeling Prep rate limit reached.", thrown.Message);
-        Assert.Same(primaryError, thrown.InnerException);
+        Assert.IsNotType<TickerNotFoundException>(ex);
+        Assert.Equal(
+            "Eulerpool rejected the API key (HTTP 401 from equity/profile/SAN.PA). " +
+            "Fallback: Financial Modeling Prep rate limit reached (HTTP 429 from profile?symbol=SAN.PA).",
+            ex.Message);
+        Assert.Same(primaryError, ex.InnerException);
     }
 
     [Fact]
@@ -143,6 +158,13 @@ public class RoutingMarketDataClientTests
         public MarketDataException Throws(string message)
         {
             var ex = new MarketDataException(message);
+            _behavior = _ => throw ex;
+            return ex;
+        }
+
+        public TickerNotFoundException ThrowsNotFound(string message)
+        {
+            var ex = new TickerNotFoundException(message);
             _behavior = _ => throw ex;
             return ex;
         }

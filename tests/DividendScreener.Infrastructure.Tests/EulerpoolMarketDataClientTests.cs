@@ -2,7 +2,7 @@ using System.Net;
 using DividendScreener.Core.MarketData;
 using DividendScreener.Core.Models;
 using DividendScreener.Infrastructure.MarketData.Eulerpool;
-using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Logging;
 
 namespace DividendScreener.Infrastructure.Tests;
 
@@ -67,11 +67,13 @@ public class EulerpoolMarketDataClientTests
         .Json("equity/cashflowstatement", CashFlowJson)
         .Json("equity/dividends", DividendsJson);
 
+    private readonly ListLogger<EulerpoolMarketDataClient> _logger = new();
+
     private EulerpoolMarketDataClient CreateClient(string? apiKey = "test-key") => new(
         new StubHttpClientFactory(_http, "https://eulerpool.test/api/1/"),
         new EulerpoolOptions { ApiKey = apiKey },
         new FixedTimeProvider(Now),
-        NullLogger<EulerpoolMarketDataClient>.Instance);
+        _logger);
 
     // ---------- Happy path ----------
 
@@ -184,20 +186,96 @@ public class EulerpoolMarketDataClientTests
     // ---------- Missing data ----------
 
     [Fact]
-    public async Task UnknownSecurity_Returns404Null_WithoutFurtherRequests()
+    public async Task UnknownSecurity_ThrowsNotFound_WithStatusAndProviderError_WithoutFurtherRequests()
     {
         _http.Status("equity/profile", HttpStatusCode.NotFound, """{"error":"Security not found"}""");
 
-        Assert.Null(await CreateClient().GetSnapshotAsync("NOPE.PA"));
+        var ex = await Assert.ThrowsAsync<TickerNotFoundException>(() => CreateClient().GetSnapshotAsync("NDA-SE.ST"));
+
+        Assert.Equal(
+            "Eulerpool does not recognise 'NDA-SE.ST' (HTTP 404 from equity/profile/NDA-SE.ST: Security not found).",
+            ex.Message);
         Assert.Single(_http.Requests);
     }
 
     [Fact]
-    public async Task ProfileWithoutIsin_IsTreatedAsUnknown()
+    public async Task ProfileWithoutIsin_ThrowsNotFound()
     {
         _http.Json("equity/profile", """{"name":"Something"}""");
 
-        Assert.Null(await CreateClient().GetSnapshotAsync("ODD.PA"));
+        var ex = await Assert.ThrowsAsync<TickerNotFoundException>(() => CreateClient().GetSnapshotAsync("ODD.PA"));
+        Assert.Contains("without an ISIN", ex.Message);
+    }
+
+    [Fact]
+    public async Task QuotesNotFound_IsAProviderFailure_NotAnUnknownTicker()
+    {
+        _http.Status("equity/quotes", HttpStatusCode.NotFound, """{"error":"Security not found"}""");
+
+        var ex = await Assert.ThrowsAsync<MarketDataException>(() => CreateClient().GetSnapshotAsync("EXD.PA"));
+
+        Assert.IsNotType<TickerNotFoundException>(ex);
+        Assert.Contains("HTTP 404 from equity/quotes/FR0000000001: Security not found", ex.Message);
+    }
+
+    [Fact]
+    public async Task DividendsNotFound_MeansNoDividends()
+    {
+        _http.Status("equity/dividends", HttpStatusCode.NotFound);
+
+        var snapshot = await CreateClient().GetSnapshotAsync("EXD.PA");
+
+        Assert.Empty(snapshot!.Metrics.DividendHistory);
+    }
+
+    [Fact]
+    public async Task NumberSentAsString_IsAccepted()
+    {
+        _http.Json("sentiment/price-metrics", """{"symbol":"EXD.PA","beta":"1.083"}""");
+
+        var snapshot = await CreateClient().GetSnapshotAsync("EXD.PA");
+
+        Assert.Equal(1.083m, snapshot!.Metrics.Beta);
+    }
+
+    [Fact]
+    public async Task UnparseableField_ErrorNamesTheJsonPath_AndLogsTheBody()
+    {
+        _http.Json("sentiment/price-metrics", """{"symbol":"EXD.PA","beta":"1,083"}""");
+
+        var ex = await Assert.ThrowsAsync<MarketDataException>(() => CreateClient().GetSnapshotAsync("EXD.PA"));
+
+        Assert.Contains("malformed data for EXD.PA (HTTP 200 from sentiment/price-metrics/FR0000000001)", ex.Message);
+        Assert.Contains("Path: $.beta", ex.Message);
+        Assert.Contains(_logger.Entries, e => e.Level == LogLevel.Warning && e.Message.Contains("\"beta\":\"1,083\""));
+    }
+
+    // ---------- Logging ----------
+
+    [Fact]
+    public async Task EveryRequest_IsLoggedWithExactUrlAndStatus_WithoutTheKey()
+    {
+        await CreateClient().GetSnapshotAsync("EXD.PA");
+
+        Assert.Contains(_logger.Entries, e =>
+            e.Level == LogLevel.Information &&
+            e.Message.StartsWith("Eulerpool GET https://eulerpool.test/api/1/equity/profile/EXD.PA -> 200"));
+        Assert.Contains(_logger.Entries, e =>
+            e.Message.StartsWith("Eulerpool GET https://eulerpool.test/api/1/equity/quotes/FR0000000001 -> 200"));
+        Assert.Equal(5, _logger.Entries.Count(e => e.Message.StartsWith("Eulerpool GET ")));
+        Assert.DoesNotContain(_logger.Entries, e => e.Message.Contains("test-key"));
+    }
+
+    [Fact]
+    public async Task FailedRequest_IsLoggedAsWarningWithBody()
+    {
+        _http.Status("equity/profile", HttpStatusCode.NotFound, """{"error":"Security not found"}""");
+
+        await Assert.ThrowsAsync<TickerNotFoundException>(() => CreateClient().GetSnapshotAsync("ERIC-B.ST"));
+
+        var entry = Assert.Single(_logger.Entries, e => e.Level == LogLevel.Warning);
+        Assert.StartsWith("Eulerpool GET https://eulerpool.test/api/1/equity/profile/ERIC-B.ST -> 404", entry.Message);
+        Assert.Contains("Security not found", entry.Message);
     }
 
     [Theory]
@@ -236,15 +314,15 @@ public class EulerpoolMarketDataClientTests
     }
 
     [Theory]
-    [InlineData("equity/profile", HttpStatusCode.Unauthorized, """{"error":"Missing or invalid API key. Pass ?token=YOUR_KEY or Authorization: Bearer YOUR_KEY."}""", "rejected the API key")]
-    [InlineData("equity/profile", HttpStatusCode.TooManyRequests, "", "rate limit")]
-    [InlineData("equity/quotes", HttpStatusCode.TooManyRequests, "", "rate limit")]
-    [InlineData("equity/dividends", HttpStatusCode.Forbidden, """{"error":"Insufficient access rights"}""", "plan does not include equity/dividends data for EXD.PA")]
-    [InlineData("equity/quotes", HttpStatusCode.PaymentRequired, "", "plan does not include equity/quotes data for EXD.PA")]
-    [InlineData("equity/profile", HttpStatusCode.InternalServerError, """{"error":"Database unavailable"}""", "HTTP 500 for equity/profile: Database unavailable")]
-    [InlineData("sentiment/price-metrics", HttpStatusCode.OK, """{"error":"Unexpected failure"}""", "Unexpected failure")]
-    [InlineData("equity/profile", HttpStatusCode.OK, "<html>not json</html>", "malformed")]
-    [InlineData("equity/quotes", HttpStatusCode.OK, """{"not":"an array"}""", "malformed")]
+    [InlineData("equity/profile", HttpStatusCode.Unauthorized, """{"error":"Missing or invalid API key. Pass ?token=YOUR_KEY or Authorization: Bearer YOUR_KEY."}""", "rejected the API key (HTTP 401 from equity/profile/EXD.PA: Missing or invalid API key")]
+    [InlineData("equity/profile", HttpStatusCode.TooManyRequests, "", "rate limit reached (HTTP 429 from equity/profile/EXD.PA)")]
+    [InlineData("equity/quotes", HttpStatusCode.TooManyRequests, "", "rate limit reached (HTTP 429 from equity/quotes/FR0000000001)")]
+    [InlineData("equity/dividends", HttpStatusCode.Forbidden, """{"error":"Insufficient access rights"}""", "plan does not include this data for EXD.PA (HTTP 403 from equity/dividends/FR0000000001: Insufficient access rights)")]
+    [InlineData("equity/quotes", HttpStatusCode.PaymentRequired, "", "plan does not include this data for EXD.PA (HTTP 402 from equity/quotes/FR0000000001)")]
+    [InlineData("equity/profile", HttpStatusCode.InternalServerError, """{"error":"Database unavailable"}""", "Eulerpool request failed (HTTP 500 from equity/profile/EXD.PA: Database unavailable)")]
+    [InlineData("sentiment/price-metrics", HttpStatusCode.OK, """{"error":"Unexpected failure"}""", "reported an error for EXD.PA: Unexpected failure (HTTP 200 from sentiment/price-metrics/FR0000000001)")]
+    [InlineData("equity/profile", HttpStatusCode.OK, "<html>not json</html>", "malformed data for EXD.PA (HTTP 200 from equity/profile/EXD.PA): '<' is an invalid start of a value")]
+    [InlineData("equity/quotes", HttpStatusCode.OK, """{"not":"an array"}""", "malformed data for EXD.PA (HTTP 200 from equity/quotes/FR0000000001): The JSON value could not be converted")]
     public async Task Errors_BecomeMarketDataException(string endpoint, HttpStatusCode status, string body, string expectedMessage)
     {
         _http.Status(endpoint, status, body);

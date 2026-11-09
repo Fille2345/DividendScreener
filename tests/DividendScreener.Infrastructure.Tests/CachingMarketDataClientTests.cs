@@ -32,6 +32,19 @@ public class CachingMarketDataClientTests
     }
 
     [Fact]
+    public async Task NotFoundReason_IsCached_AndRethrownWithSameMessage()
+    {
+        var inner = new NotFoundClient();
+        var sut = new CachingMarketDataClient(inner, new MemoryCache(new MemoryCacheOptions()), new MarketDataOptions());
+
+        var first = await Assert.ThrowsAsync<TickerNotFoundException>(() => sut.GetSnapshotAsync("NDA-SE.ST"));
+        var second = await Assert.ThrowsAsync<TickerNotFoundException>(() => sut.GetSnapshotAsync("nda-se.st"));
+
+        Assert.Equal(first.Message, second.Message);
+        Assert.Equal(1, inner.Calls);
+    }
+
+    [Fact]
     public async Task Failures_AreNotCached()
     {
         var failing = new FailingOnceClient();
@@ -49,6 +62,17 @@ public class CachingMarketDataClientTests
         {
             Calls++;
             return inner.GetSnapshotAsync(ticker, cancellationToken);
+        }
+    }
+
+    private sealed class NotFoundClient : IMarketDataClient
+    {
+        public int Calls { get; private set; }
+
+        public Task<MarketSnapshot?> GetSnapshotAsync(string ticker, CancellationToken cancellationToken = default)
+        {
+            Calls++;
+            throw new TickerNotFoundException($"Eulerpool does not recognise '{ticker}' (HTTP 404 from equity/profile/{ticker}).");
         }
     }
 

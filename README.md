@@ -74,6 +74,23 @@ FMP takes the key as a query parameter (redacted in logs); Eulerpool takes it as
 - **Errors**: missing or rejected keys, rate limits, data outside your plan, timeouts and malformed responses
   → 502 with an explanation. Network errors and 5xx responses are retried twice; 429 is not.
 
+## Debugging market data
+
+- **Error details**: a failed lookup's 404/502 `detail` names each provider's outcome, including the HTTP status,
+  the request path, the provider's own error text, or the JSON parsing error and field path, for example
+  `Eulerpool does not recognise 'X.ST' (HTTP 404 from equity/profile/X.ST: Security not found). Fallback: ...`.
+  Unknown tickers are cached with their reason for 5 minutes.
+- **Logs**: every provider request is logged with its exact URL (never the API key), status and timing.
+  Failures are logged as warnings with the first 500 characters of the response body.
+- **Raw Eulerpool responses** (Development only, bypasses caching and valuation):
+
+  ```
+  GET /api/debug/eulerpool/{identifier}?endpoint=profile|quotes|price-metrics|cashflowstatement|dividends
+  ```
+
+  Returns the upstream URL, status, timing and body as-is. `{identifier}` can be a ticker (`NDA-SE.ST`,
+  `VOLV%20B.ST`) or an ISIN. Each call spends one request of your Eulerpool quota.
+
 ## Run
 
 ```sh

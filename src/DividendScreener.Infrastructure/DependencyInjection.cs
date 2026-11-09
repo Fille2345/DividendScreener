@@ -66,6 +66,8 @@ public static class DependencyInjection
     private static Func<IServiceProvider, IMarketDataClient> AddEulerpool(IServiceCollection services)
     {
         AddResilientHttpClient(services, EulerpoolOptions.HttpClientName, cfg => ReadEulerpoolOptions(cfg).BaseUrl);
+        services.AddSingleton(sp => new EulerpoolDiagnostics(
+            sp.GetRequiredService<IHttpClientFactory>(), ReadEulerpoolOptions(sp.GetRequiredService<IConfiguration>())));
 
         return sp =>
         {
